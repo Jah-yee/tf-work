@@ -146,12 +146,24 @@ namespace {
 
 bool IsFoldable(
     const HloInstruction* instruction, HloConstantFolding::Level level,
-    absl::flat_hash_map<HloComputation*, bool>& is_foldable_computation) {
+    absl::flat_hash_map<HloComputation*, bool>& is_foldable_computation,
+    bool is_inside_fusion = false) {
   // Broadcasts dramatically increase the size of constants, which is often
   // detrimental to performance and memory capacity, so do not fold
   // broadcasts.
-  if (instruction->opcode() == HloOpcode::kBroadcast ||
-      instruction->opcode() == HloOpcode::kIota) {
+  if (instruction->opcode() == HloOpcode::kBroadcast) {
+    if (is_inside_fusion && instruction->shape().IsArray() &&
+        ShapeUtil::ElementsIn(instruction->shape()) <= 32) {
+      return true;
+    }
+    return false;
+  }
+
+  // Similar to broadcasts, large iotas dramatically increase the size of
+  // constants, so we only fold iotas smaller than 32.
+  if (instruction->opcode() == HloOpcode::kIota &&
+      (!instruction->shape().IsArray() ||
+       ShapeUtil::ElementsIn(instruction->shape()) > 32)) {
     return false;
   }
 
@@ -180,7 +192,8 @@ bool IsFoldable(
     auto iter = is_foldable_computation.find(subcomputation);
     if (iter == is_foldable_computation.end()) {
       for (auto* sub_instruction : subcomputation->MakeInstructionPostOrder()) {
-        if (!IsFoldable(sub_instruction, level, is_foldable_computation)) {
+        if (!IsFoldable(sub_instruction, level, is_foldable_computation,
+                        /*is_inside_fusion=*/true)) {
           is_foldable_computation[subcomputation] = false;
           return false;
         }
@@ -353,6 +366,8 @@ absl::StatusOr<bool> HloConstantFolding::RunImpl(
       //    broadcasts of constants, e.g. op(constant, broadcast(constant)).
       //
       if (level_ == HloConstantFolding::Level::kDefault &&
+          instruction->opcode() != HloOpcode::kIota &&
+          instruction->operand_count() > 0 &&
           !AnyOperandsConstant(instruction)) {
         continue;
       }
