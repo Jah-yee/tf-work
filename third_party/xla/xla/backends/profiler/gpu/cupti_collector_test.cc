@@ -35,8 +35,11 @@ namespace profiler {
 namespace {
 
 using ::tensorflow::profiler::XSpace;
+using ::testing::Contains;
+using ::testing::EqualsProto;
 using ::testing::Pair;
 using ::testing::UnorderedElementsAre;
+using ::testing::proto::Partially;
 
 TEST(CuptiCollectorTest, TestPmSamplingDataToCounterLine) {
   PmSamples pm_samples({"metric1", "metric2"},
@@ -286,6 +289,165 @@ TEST(PmSamplesTest, PopulateCounterLineSkipsNan) {
   const auto& stat = event.stats(0);
   EXPECT_EQ(plane.stat_metadata().at(stat.metadata_id()).name(), "metric1");
   EXPECT_EQ(stat.double_value(), 123.0);
+}
+
+TEST(CuptiCollectorTest, AggregatedTracingStats) {
+  CuptiTracerCollectorOptions options;
+  options.num_gpus = 1;
+  options.aggregated_tracing = true;
+  std::unique_ptr<CuptiTraceCollector> collector =
+      CreateCuptiCollector(options, 0, 0);
+
+  collector->AddEvent(CuptiTracerEvent{
+      /*type=*/CuptiTracerEventType::Kernel,
+      /*source=*/CuptiTracerEventSource::Activity,
+      /*name=*/"kernel1",
+      /*annotation=*/"Thunk:#hlo_op=foo#",
+      /*nvtx_range=*/"",
+      /*start_time_ns=*/100,
+      /*end_time_ns=*/200,
+      /*device_id=*/0,
+      /*correlation_id=*/1,
+      /*thread_id=*/100,
+      /*context_id=*/1,
+      /*stream_id=*/2,
+      /*graph_id=*/0,
+      /*scope_range_id=*/0,
+      /*graph_node_id=*/0,
+  });
+
+  collector->AddEvent(CuptiTracerEvent{
+      /*type=*/CuptiTracerEventType::Kernel,
+      /*source=*/CuptiTracerEventSource::Activity,
+      /*name=*/"kernel1",
+      /*annotation=*/"Thunk:#hlo_op=foo#",
+      /*nvtx_range=*/"",
+      /*start_time_ns=*/300,
+      /*end_time_ns=*/450,
+      /*device_id=*/0,
+      /*correlation_id=*/2,
+      /*thread_id=*/100,
+      /*context_id=*/1,
+      /*stream_id=*/2,
+      /*graph_id=*/0,
+      /*scope_range_id=*/0,
+      /*graph_node_id=*/0,
+  });
+
+  collector->AddEvent(CuptiTracerEvent{
+      /*type=*/CuptiTracerEventType::Kernel,
+      /*source=*/CuptiTracerEventSource::Activity,
+      /*name=*/"kernel2",
+      /*annotation=*/"Thunk:#hlo_op=bar#",
+      /*nvtx_range=*/"",
+      /*start_time_ns=*/500,
+      /*end_time_ns=*/600,
+      /*device_id=*/0,
+      /*correlation_id=*/3,
+      /*thread_id=*/100,
+      /*context_id=*/1,
+      /*stream_id=*/2,
+      /*graph_id=*/0,
+      /*scope_range_id=*/0,
+      /*graph_node_id=*/0,
+  });
+
+  XSpace space;
+  collector->Export(&space, /*end_gpu_ns=*/700);
+
+  EXPECT_THAT(
+      space.planes(), Contains(Partially(EqualsProto(R"pb(
+        name: "/device:GPU:0"
+        lines {
+          events { metadata_id: 1 duration_ps: 250000 num_occurrences: 2 }
+          events { metadata_id: 2 duration_ps: 100000 num_occurrences: 1 }
+        }
+        event_metadata {
+          key: 1
+          value { name: "kernel1" }
+        }
+        event_metadata {
+          key: 2
+          value { name: "kernel2" }
+        }
+      )pb"))));
+}
+
+TEST(CuptiCollectorTest, AggregatedTracingOutOfRangeEvents) {
+  CuptiTracerCollectorOptions options;
+  options.num_gpus = 1;
+  options.aggregated_tracing = true;
+  std::unique_ptr<CuptiTraceCollector> collector =
+      CreateCuptiCollector(options, 0, 400);
+
+  collector->AddEvent(CuptiTracerEvent{
+      /*type=*/CuptiTracerEventType::Kernel,
+      /*source=*/CuptiTracerEventSource::Activity,
+      /*name=*/"kernel1",
+      /*annotation=*/"Thunk:#hlo_op=foo#",
+      /*nvtx_range=*/"",
+      /*start_time_ns=*/100,
+      /*end_time_ns=*/200,
+      /*device_id=*/0,
+      /*correlation_id=*/1,
+      /*thread_id=*/100,
+      /*context_id=*/1,
+      /*stream_id=*/2,
+      /*graph_id=*/0,
+      /*scope_range_id=*/0,
+      /*graph_node_id=*/0,
+  });
+
+  collector->AddEvent(CuptiTracerEvent{
+      /*type=*/CuptiTracerEventType::Kernel,
+      /*source=*/CuptiTracerEventSource::Activity,
+      /*name=*/"kernel1",
+      /*annotation=*/"Thunk:#hlo_op=foo#",
+      /*nvtx_range=*/"",
+      /*start_time_ns=*/300,
+      /*end_time_ns=*/450,
+      /*device_id=*/0,
+      /*correlation_id=*/2,
+      /*thread_id=*/100,
+      /*context_id=*/1,
+      /*stream_id=*/2,
+      /*graph_id=*/0,
+      /*scope_range_id=*/0,
+      /*graph_node_id=*/0,
+  });
+
+  collector->AddEvent(CuptiTracerEvent{
+      /*type=*/CuptiTracerEventType::Kernel,
+      /*source=*/CuptiTracerEventSource::Activity,
+      /*name=*/"kernel2",
+      /*annotation=*/"Thunk:#hlo_op=bar#",
+      /*nvtx_range=*/"",
+      /*start_time_ns=*/500,
+      /*end_time_ns=*/600,
+      /*device_id=*/0,
+      /*correlation_id=*/3,
+      /*thread_id=*/100,
+      /*context_id=*/1,
+      /*stream_id=*/2,
+      /*graph_id=*/0,
+      /*scope_range_id=*/0,
+      /*graph_node_id=*/0,
+  });
+
+  XSpace space;
+  collector->Export(&space, /*end_gpu_ns=*/700);
+
+  EXPECT_THAT(
+      space.planes(), Contains(Partially(EqualsProto(R"pb(
+        name: "/device:GPU:0"
+        lines {
+          events { metadata_id: 1 duration_ps: 100000 num_occurrences: 1 }
+        }
+        event_metadata {
+          key: 1
+          value { name: "kernel2" }
+        }
+      )pb"))));
 }
 
 }  // namespace
