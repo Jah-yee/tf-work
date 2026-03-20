@@ -73,6 +73,9 @@ message BatchOpRewriteConfig {
 
     // Adaptive batch scheduler options.
     optional AdaptiveBatchSchedulerOption adaptive_batch_scheduler_option = 7;
+
+    // Number of warmup threads for processing warmup requests.
+    optional int32 num_warmup_batch_threads = 8;
   }
 
   // The options for overriding BatchFunction op in specific models.

@@ -56,13 +56,16 @@ void AddBatchOp(
     int low_priority_max_batch_size = -1,
     int low_priority_batch_timeout_micros = -1,
     const std::vector<int32_t>& low_priority_allowed_batch_sizes = {},
-    int low_priority_max_enqueued_batches = -1) {
+    int low_priority_max_enqueued_batches = -1,
+    int num_warmup_batch_threads = 0) {
   auto set_batch_node_attribute = [&](const int32_t num_batch_threads,
                                       NodeDef* batch_op) {
     batch_op->set_name("cond/batch/BatchFunction");
     batch_op->set_op("BatchFunction");
     ::tensorflow::graph_transforms::SetNodeAttr("num_batch_threads",
                                                 num_batch_threads, batch_op);
+    ::tensorflow::graph_transforms::SetNodeAttr(
+        "num_warmup_batch_threads", num_warmup_batch_threads, batch_op);
     ::tensorflow::graph_transforms::SetNodeAttr("max_batch_size",
                                                 max_batch_size, batch_op);
     ::tensorflow::graph_transforms::SetNodeAttr("batch_timeout_micros",
@@ -284,6 +287,8 @@ TEST_F(BatchOpRewriterTest, UpdateBatchOptions) {
   // PARSE_TEXT_PROTO isn't available in TF OSS.
   (*config.mutable_batch_options())["model_with_override"]
       .set_num_batch_threads(2);
+  (*config.mutable_batch_options())["model_with_override"]
+      .set_num_warmup_batch_threads(4);
   (*config.mutable_batch_options())["model_with_override"].set_max_batch_size(
       128);
   (*config.mutable_batch_options())["model_with_override"]
@@ -317,11 +322,16 @@ TEST_F(BatchOpRewriterTest, UpdateBatchOptions) {
   // overridden to zero regardless of
   // `enable_adaptive_shared_batching_thread_pool`, since `model_with_override`
   // override its scheduler options in `model_scheduler_options`.
-  AddBatchOp(&expected_graph, 2 /* num_batch_threads */,
-             {} /* reserved_int_attrs */, 128 /* max_batch_size */,
-             5000 /* batch_timeout_micros */, allowed_batch_sizes,
-             500 /* max_enqueued_batches */,
-             true /* disable_large_batch_splitting */);
+  AddBatchOp(
+      &expected_graph, 2 /* num_batch_threads */, {} /* reserved_int_attrs */,
+      128 /* max_batch_size */, 5000 /* batch_timeout_micros */,
+      allowed_batch_sizes, 500 /* max_enqueued_batches */,
+      true /* disable_large_batch_splitting */, "" /* mixed_priority_policy */,
+      -1 /* low_priority_max_batch_size */,
+      -1 /* low_priority_batch_timeout_micros */,
+      {} /* low_priority_allowed_batch_sizes */,
+      -1 /* low_priority_max_enqueued_batches */,
+      4 /* num_warmup_batch_threads */);
 
   EXPECT_EQ(optimized_graph.DebugString(), expected_graph.DebugString());
 }

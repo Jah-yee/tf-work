@@ -42,6 +42,7 @@ namespace {
 constexpr char kBatchFunction[] = "BatchFunction";
 constexpr char kBatchOpRewriteConfigParamKey[] = "batch_op_rewrite_config";
 constexpr char kNumBatchThreadsAttr[] = "num_batch_threads";
+constexpr char kNumWarmupBatchThreadsAttr[] = "num_warmup_batch_threads";
 constexpr char kMaxBatchSizeAttr[] = "max_batch_size";
 constexpr char kBatchTimeoutMicrosAttr[] = "batch_timeout_micros";
 constexpr char kAllowedBatchSizesAttr[] = "allowed_batch_sizes";
@@ -235,6 +236,11 @@ Status BatchOpRewriter::Optimize(Cluster* cluster, const GrapplerItem& item,
           ::tensorflow::graph_transforms::SetNodeAttr(
               kNumBatchThreadsAttr, batch_options.num_batch_threads(),
               batch_op);
+        }
+        if (batch_options.has_num_warmup_batch_threads()) {
+          ::tensorflow::graph_transforms::SetNodeAttr(
+              kNumWarmupBatchThreadsAttr,
+              batch_options.num_warmup_batch_threads(), batch_op);
         }
         if (batch_options.has_max_batch_size()) {
           ::tensorflow::graph_transforms::SetNodeAttr(
