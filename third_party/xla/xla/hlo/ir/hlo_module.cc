@@ -34,6 +34,7 @@ limitations under the License.
 #include "absl/container/flat_hash_map.h"
 #include "absl/container/flat_hash_set.h"
 #include "absl/functional/overload.h"
+#include "absl/memory/memory.h"
 #include "absl/status/status.h"
 #include "absl/strings/cord.h"
 #include "absl/strings/escaping.h"
@@ -98,6 +99,19 @@ HloModule::HloModule(const std::string& name,
     : name_(NameUniquer::GetSanitizedName(name)),
       config_(config),
       unique_id_(next_unique_module_id_++),
+      metadata_(tsl::Env::Default()),
+      autofdo_fingerprint_(""),
+      comp_envs_(std::move(comp_envs)) {
+  metadata_.set_canonical_module_id(unique_id_);
+}
+
+// Private constructor.
+HloModule::HloModule(const std::string& name, HloModuleConfig config,
+                     std::unique_ptr<CompilationEnvironments> comp_envs,
+                     int module_id)
+    : name_(NameUniquer::GetSanitizedName(name)),
+      config_(std::make_shared<HloModuleConfig>(std::move(config))),
+      unique_id_(module_id <= 0 ? next_unique_module_id_++ : module_id),
       metadata_(tsl::Env::Default()),
       autofdo_fingerprint_(""),
       comp_envs_(std::move(comp_envs)) {
@@ -798,10 +812,10 @@ void HloModule::CanonicalizeStackFrameIds(
 absl::StatusOr<std::unique_ptr<HloModule>> HloModule::CreateFromProto(
     const HloModuleProto& proto, const HloModuleConfig& module_config,
     BufferAssignmentProto* buffer_assignment_proto,
-    bool preserve_instruction_ids) {
+    bool preserve_instruction_ids, int module_id) {
   return CreateFromProto(proto, module_config, /*prohibit_empty_literal=*/true,
                          /*comp_envs=*/nullptr, preserve_instruction_ids,
-                         buffer_assignment_proto);
+                         buffer_assignment_proto, module_id);
 }
 
 /* static */
@@ -810,7 +824,7 @@ absl::StatusOr<std::unique_ptr<HloModule>> HloModule::CreateFromProto(
     bool prohibit_empty_literal,
     std::unique_ptr<CompilationEnvironments> comp_envs,
     bool preserve_instruction_ids,
-    BufferAssignmentProto* buffer_assignment_proto) {
+    BufferAssignmentProto* buffer_assignment_proto, int module_id) {
   VLOG(2) << "CreateFromProto()";
   XLA_VLOG_LINES(3, proto.DebugString());
   bool buffer_assignment_needs_remap =
@@ -881,10 +895,11 @@ absl::StatusOr<std::unique_ptr<HloModule>> HloModule::CreateFromProto(
   }
   TF_RET_CHECK(entry != nullptr);
 
-  auto module = comp_envs
-                    ? std::make_unique<HloModule>(proto.name(), module_config,
-                                                  std::move(comp_envs))
-                    : std::make_unique<HloModule>(proto.name(), module_config);
+  auto module = absl::WrapUnique(
+      new HloModule(proto.name(), module_config,
+                    comp_envs ? std::move(comp_envs)
+                              : std::make_unique<CompilationEnvironments>(),
+                    module_id));
 
   if (!proto.device_type().empty()) {
     module->mutable_config().set_device_type(proto.device_type());
@@ -1138,23 +1153,25 @@ absl::StatusOr<HloModuleConfig> HloModule::CreateModuleConfigFromProto(
 absl::StatusOr<std::unique_ptr<HloModule>> HloModule::CreateFromProtoWithConfig(
     const HloModuleProtoWithConfig& proto,
     BufferAssignmentProto* buffer_assignment_proto,
-    bool preserve_instruction_ids) {
-  return CreateFromProtoWithConfig(
-      proto, /*prohibit_empty_literal=*/true,
-      /*comp_envs=*/nullptr, preserve_instruction_ids, buffer_assignment_proto);
+    bool preserve_instruction_ids, int module_id) {
+  return CreateFromProtoWithConfig(proto, /*prohibit_empty_literal=*/true,
+                                   /*comp_envs=*/nullptr,
+                                   preserve_instruction_ids,
+                                   buffer_assignment_proto, module_id);
 }
 
 absl::StatusOr<std::unique_ptr<HloModule>> HloModule::CreateFromProtoWithConfig(
     const HloModuleProtoWithConfig& proto, bool prohibit_empty_literal,
     std::unique_ptr<CompilationEnvironments> comp_envs,
     bool preserve_instruction_ids,
-    BufferAssignmentProto* buffer_assignment_proto) {
+    BufferAssignmentProto* buffer_assignment_proto, int module_id) {
   const auto& hlo_module_proto = proto.hlo_module();
   TF_ASSIGN_OR_RETURN(std::unique_ptr<HloModuleConfig> config_ptr,
                       HloModuleConfig::CreateFromProto(proto.config()));
   return HloModule::CreateFromProto(
       hlo_module_proto, *config_ptr, prohibit_empty_literal,
-      std::move(comp_envs), preserve_instruction_ids, buffer_assignment_proto);
+      std::move(comp_envs), preserve_instruction_ids, buffer_assignment_proto,
+      module_id);
 }
 
 namespace {
@@ -1844,6 +1861,6 @@ void HloModule::OriginalValueRecoveryTable::BuildAndAddRecoveryComputation(
       });
 }
 
-/* static */ std::atomic<int> HloModule::next_unique_module_id_(0);
+/* static */ std::atomic<int> HloModule::next_unique_module_id_(1);
 
 }  // namespace xla

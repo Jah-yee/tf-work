@@ -626,8 +626,9 @@ absl::StatusOr<std::pair<std::unique_ptr<PjRtCpuExecutable>,
                          std::shared_ptr<DeviceAssignment>>>
 PjRtCpuClient::CompileAndAssignDevices(MaybeOwningMlirModule module,
                                        CompileOptions options) {
-  TF_RETURN_IF_ERROR(
-      pjrt::MaybeDumpCompileInputs(options, module.mlir_module(), *topology_));
+  int module_id = HloModule::GetNextUniqueModuleId();
+  TF_RETURN_IF_ERROR(pjrt::MaybeDumpCompileInputs(options, module.mlir_module(),
+                                                  *topology_, module_id));
 
   XlaComputation xla_computation;
   ExecutableBuildOptions& exec_build_options = options.executable_build_options;
@@ -635,6 +636,7 @@ PjRtCpuClient::CompileAndAssignDevices(MaybeOwningMlirModule module,
       module.mlir_module(), xla_computation,
       /*use_tuple_args=*/options.parameter_is_tupled_arguments,
       /*return_tuple=*/false, &exec_build_options));
+  xla_computation.mutable_proto()->set_id(module_id);
 
   if (options.argument_layouts) {
     return CompileAndAssignDevices(xla_computation, options);
@@ -866,7 +868,10 @@ PjRtCpuClient::CompileInternal(
   const xla::HloModuleProto& hlo_module_proto = computation.proto();
   TF_ASSIGN_OR_RETURN(
       std::unique_ptr<HloModule> hlo_module,
-      xla::HloModule::CreateFromProto(hlo_module_proto, *hlo_module_config));
+      xla::HloModule::CreateFromProto(hlo_module_proto, *hlo_module_config,
+                                      /*buffer_assignment_proto=*/nullptr,
+                                      /*preserve_instruction_ids=*/true,
+                                      hlo_module_proto.id()));
 
   if (aot_options) {
     TF_ASSIGN_OR_RETURN(cpu_executable,
@@ -909,8 +914,10 @@ PjRtCpuClient::CompileInternal(
   if (xla_dump_hlo_unoptimized_snapshots) {
     TF_ASSIGN_OR_RETURN(
         unoptimized_hlo_module,
-        HloModule::CreateFromProto(computation.proto(),
-                                   cpu_executable->module().config()));
+        HloModule::CreateFromProto(
+            computation.proto(), cpu_executable->module().config(),
+            /*buffer_assignment_proto=*/nullptr,
+            /*preserve_instruction_ids=*/true, computation.proto().id()));
   }
 
   auto executable = std::make_unique<PjRtCpuExecutable>(

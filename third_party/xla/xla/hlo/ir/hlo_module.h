@@ -455,6 +455,10 @@ class HloModule {
   void set_is_dynamic(bool is_dynamic) { is_dynamic_ = is_dynamic; }
 
  private:
+  // Private constructor which accepts the `module_id` so that pre-allocated
+  // module id will be used for the HloModule.
+  HloModule(const std::string& name, HloModuleConfig config,
+            std::unique_ptr<CompilationEnvironments> comp_envs, int module_id);
   void PrintComputations(Printer* printer,
                          const HloPrintOptions& options) const;
   void PrintConfig(Printer* printer, const HloModuleConfig& config) const;
@@ -549,12 +553,13 @@ class HloModule {
       bool prohibit_empty_literal = true,
       std::unique_ptr<CompilationEnvironments> comp_envs = nullptr,
       bool preserve_instruction_ids = true,
-      BufferAssignmentProto* buffer_assignment_proto = nullptr);
+      BufferAssignmentProto* buffer_assignment_proto = nullptr,
+      int module_id = -1);
 
   static absl::StatusOr<std::unique_ptr<HloModule>> CreateFromProto(
       const HloModuleProto& proto, const HloModuleConfig& module_config,
       BufferAssignmentProto* buffer_assignment_proto,
-      bool preserve_instruction_ids = true);
+      bool preserve_instruction_ids = true, int module_id = -1);
 
   // Convert an HloModule to or from a proto that includes module configuration
   void ToProtoWithConfig(HloModuleProtoWithConfig* proto) const;
@@ -568,12 +573,13 @@ class HloModule {
       const HloModuleProtoWithConfig& proto, bool prohibit_empty_literal = true,
       std::unique_ptr<CompilationEnvironments> comp_envs = nullptr,
       bool preserve_instruction_ids = true,
-      BufferAssignmentProto* buffer_assignment_proto = nullptr);
+      BufferAssignmentProto* buffer_assignment_proto = nullptr,
+      int module_id = -1);
 
   static absl::StatusOr<std::unique_ptr<HloModule>> CreateFromProtoWithConfig(
       const HloModuleProtoWithConfig& proto,
       BufferAssignmentProto* buffer_assignment_proto,
-      bool preserve_instruction_ids = true);
+      bool preserve_instruction_ids = true, int module_id = -1);
 
   // Creates and returns an HloModuleConfig with an appropriate program shape
   // for the HLO module in the given proto.
@@ -717,6 +723,9 @@ class HloModule {
   void set_spmd_output_sharding(const HloSharding& sharding) {
     spmd_output_sharding_ = sharding;
   }
+
+  // Returns the next unique module id.
+  static int GetNextUniqueModuleId() { return next_unique_module_id_++; }
 
   // Base class for cached backend-specific data.
   class CacheEntry {

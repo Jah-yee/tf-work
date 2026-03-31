@@ -1929,8 +1929,12 @@ absl::StatusOr<std::unique_ptr<GpuExecutable>> GpuExecutable::FromProto(
   params.binary.assign(binary.begin(), binary.end());
   params.buffer_assignment = nullptr;
   if (proto.has_hlo_module_with_config()) {
-    ASSIGN_OR_RETURN(params.debug_module, HloModule::CreateFromProtoWithConfig(
-                                              proto.hlo_module_with_config()));
+    ASSIGN_OR_RETURN(
+        params.debug_module,
+        HloModule::CreateFromProtoWithConfig(
+            proto.hlo_module_with_config(), /*buffer_assignment_proto=*/nullptr,
+            /*preserve_instruction_ids=*/true,
+            proto.hlo_module_with_config().hlo_module().id()));
   }
 
   params.mlir_allocations.emplace();

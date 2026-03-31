@@ -5596,7 +5596,10 @@ absl::StatusOr<std::unique_ptr<xla::HloModule>> ConvertMlirHloToHloModule(
   // Modify config with values stored in MLIR module attributes
   mhlo::ExportHloModuleConfig(config, module);
 
-  return xla::HloModule::CreateFromProto(module_proto, config);
+  return xla::HloModule::CreateFromProto(module_proto, config,
+                                         /*buffer_assignment_proto=*/nullptr,
+                                         /*preserve_instruction_ids=*/true,
+                                         module_proto.id());
 }
 
 absl::Status BuildHloFromMlirHlo(mlir::ModuleOp& module,

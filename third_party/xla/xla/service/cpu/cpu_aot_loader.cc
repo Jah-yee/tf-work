@@ -157,7 +157,10 @@ CpuAotLoader::LoadAotCompilationResult(
 
   TF_ASSIGN_OR_RETURN(
       std::unique_ptr<HloModule> hlo_module,
-      HloModule::CreateFromProtoWithConfig(aot_result_proto.hlo_module()));
+      HloModule::CreateFromProtoWithConfig(
+          aot_result_proto.hlo_module(), /*buffer_assignment_proto=*/nullptr,
+          /*preserve_instruction_ids=*/true,
+          aot_result_proto.hlo_module().hlo_module().id()));
 
   TF_ASSIGN_OR_RETURN(TargetMachineOptions target_machine_options,
                       TargetMachineOptions::FromProto(

@@ -246,7 +246,10 @@ StreamExecutorGpuCompiler::Compile(
   HloModuleProto hlo_module_proto = computation.proto();
   TF_ASSIGN_OR_RETURN(
       std::unique_ptr<HloModule> hlo_module,
-      HloModule::CreateFromProto(hlo_module_proto, *hlo_config));
+      HloModule::CreateFromProto(hlo_module_proto, *hlo_config,
+                                 /*buffer_assignment_proto=*/nullptr,
+                                 /*preserve_instruction_ids=*/true,
+                                 hlo_module_proto.id()));
   hlo_module->mutable_config()
       .mutable_debug_options()
       .set_xla_pjrt_allow_auto_layout_in_hlo(true);

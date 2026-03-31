@@ -133,7 +133,10 @@ absl::StatusOr<std::unique_ptr<xla::HloModule>> ConvertStablehloToHloInternal(
   }
   mlir::mhlo::ExportHloModuleConfig(config.value(), module);
 
-  return xla::HloModule::CreateFromProto(module_proto, config.value());
+  return xla::HloModule::CreateFromProto(module_proto, config.value(),
+                                         /*buffer_assignment_proto=*/nullptr,
+                                         /*preserve_instruction_ids=*/true,
+                                         module_proto.id());
 }
 
 }  // namespace

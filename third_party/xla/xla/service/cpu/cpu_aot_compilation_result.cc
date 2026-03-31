@@ -149,7 +149,10 @@ absl::StatusOr<std::unique_ptr<Executable>>
 CpuAotCompilationResult::LoadExecutable() && {
   TF_ASSIGN_OR_RETURN(
       std::unique_ptr<HloModule> module,
-      HloModule::CreateFromProtoWithConfig(proto_.hlo_module()));
+      HloModule::CreateFromProtoWithConfig(
+          proto_.hlo_module(), /*buffer_assignment_proto=*/nullptr,
+          /*preserve_instruction_ids=*/true,
+          proto_.hlo_module().hlo_module().id()));
 
   VLOG(2) << "Load XLA:CPU executable for module: " << module->name();
 

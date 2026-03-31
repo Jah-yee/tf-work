@@ -97,13 +97,23 @@ absl::StatusOr<DynamicSliceThunk::OffsetAsFunctionOfIndvarModulesMetadata>
 DynamicSliceThunk::OffsetAsFunctionOfIndvarModulesMetadata::FromProto(
     const OffsetAsFunctionOfIndvarModulesMetadataProto& proto) {
   ASSIGN_OR_RETURN(std::unique_ptr<HloModule> indvar_init,
-                   HloModule::CreateFromProtoWithConfig(proto.indvar_init()));
-  ASSIGN_OR_RETURN(std::unique_ptr<HloModule> indvar_update,
-                   HloModule::CreateFromProtoWithConfig(proto.indvar_update()));
+                   HloModule::CreateFromProtoWithConfig(
+                       proto.indvar_init(), /*buffer_assignment_proto=*/nullptr,
+                       /*preserve_instruction_ids=*/true,
+                       proto.indvar_init().hlo_module().id()));
+  ASSIGN_OR_RETURN(
+      std::unique_ptr<HloModule> indvar_update,
+      HloModule::CreateFromProtoWithConfig(
+          proto.indvar_update(), /*buffer_assignment_proto=*/nullptr,
+          /*preserve_instruction_ids=*/true,
+          proto.indvar_update().hlo_module().id()));
   std::vector<std::unique_ptr<HloModule>> extracted_offset_modules;
   for (const auto& module_proto : proto.extracted_offset_modules()) {
-    ASSIGN_OR_RETURN(std::unique_ptr<HloModule> module,
-                     HloModule::CreateFromProtoWithConfig(module_proto));
+    ASSIGN_OR_RETURN(
+        std::unique_ptr<HloModule> module,
+        HloModule::CreateFromProtoWithConfig(
+            module_proto, /*buffer_assignment_proto=*/nullptr,
+            /*preserve_instruction_ids=*/true, module_proto.hlo_module().id()));
     extracted_offset_modules.push_back(std::move(module));
   }
   return OffsetAsFunctionOfIndvarModulesMetadata(

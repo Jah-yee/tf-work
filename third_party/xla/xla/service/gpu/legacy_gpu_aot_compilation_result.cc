@@ -78,7 +78,10 @@ LegacyGpuAotCompilationResult::FromProto(const GpuExecutableProto& proto,
   tsl::profiler::TraceMe traceme("ResultFromProto");
   TF_ASSIGN_OR_RETURN(
       std::unique_ptr<HloModule> module,
-      HloModule::CreateFromProtoWithConfig(proto.hlo_module_with_config()));
+      HloModule::CreateFromProtoWithConfig(
+          proto.hlo_module_with_config(), /*buffer_assignment_proto=*/nullptr,
+          /*preserve_instruction_ids=*/true,
+          proto.hlo_module_with_config().hlo_module().id()));
   return std::unique_ptr<LegacyGpuAotCompilationResult>(
       new LegacyGpuAotCompilationResult(std::move(module), std::move(proto),
                                         pointer_size, compiler));

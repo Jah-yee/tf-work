@@ -3195,7 +3195,10 @@ GpuCompiler::LoadExecutableFromAotResult(
   // Recreate HloModule+HloModuleConfig from proto.
   ASSIGN_OR_RETURN(
       std::unique_ptr<HloModule> hlo_module,
-      HloModule::CreateFromProtoWithConfig(proto.hlo_module_with_config()));
+      HloModule::CreateFromProtoWithConfig(
+          proto.hlo_module_with_config(), /*buffer_assignment_proto=*/nullptr,
+          /*preserve_instruction_ids=*/true,
+          proto.hlo_module_with_config().hlo_module().id()));
 
   ExecutionStreamAssignment execution_stream_assignment(
       hlo_module.get(),

@@ -43,9 +43,13 @@ namespace xla::gpu {
 
 absl::StatusOr<std::unique_ptr<GpuAotCompilationResult>>
 GpuAotCompilationResult::FromProto(GpuExecutableProto executable_proto) {
-  TF_ASSIGN_OR_RETURN(std::unique_ptr<HloModule> module,
-                      HloModule::CreateFromProtoWithConfig(
-                          executable_proto.hlo_module_with_config()));
+  TF_ASSIGN_OR_RETURN(
+      std::unique_ptr<HloModule> module,
+      HloModule::CreateFromProtoWithConfig(
+          executable_proto.hlo_module_with_config(),
+          /*buffer_assignment_proto=*/nullptr,
+          /*preserve_instruction_ids=*/true,
+          executable_proto.hlo_module_with_config().hlo_module().id()));
   return absl::WrapUnique(new GpuAotCompilationResult(
       std::move(executable_proto), std::move(module)));
 }
@@ -59,9 +63,13 @@ GpuAotCompilationResult::FromSerialized(
 
   TF_RETURN_IF_ERROR(ReadSplitProto(std::move(reader), *executable_proto));
 
-  TF_ASSIGN_OR_RETURN(std::unique_ptr<HloModule> module,
-                      HloModule::CreateFromProtoWithConfig(
-                          executable_proto->hlo_module_with_config()));
+  TF_ASSIGN_OR_RETURN(
+      std::unique_ptr<HloModule> module,
+      HloModule::CreateFromProtoWithConfig(
+          executable_proto->hlo_module_with_config(),
+          /*buffer_assignment_proto=*/nullptr,
+          /*preserve_instruction_ids=*/true,
+          executable_proto->hlo_module_with_config().hlo_module().id()));
   return absl::WrapUnique(
       new GpuAotCompilationResult(internal::ArenaAllocatedGpuExecutableProto(
                                       std::move(arena), executable_proto),
