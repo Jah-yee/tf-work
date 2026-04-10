@@ -1769,6 +1769,30 @@ absl::Status GpuCompiler::OptimizeHloModule(
 
   RETURN_IF_ERROR(RunAsyncDotPasses(hlo_module, compilation_stats));
   {
+    HloPassPipeline pipeline("autotune-conv-and-gemm", compilation_stats);
+    TF_RETURN_IF_ERROR(AddConvAndGemmAutotuningPass(
+        &pipeline, hlo_module, gpu_version, options, thread_pool.get_mutable(),
+        stream_exec, &gpu_topology.gpu_target_config(), options.key_value_store,
+        device_description.runtime_version(), alias_info,
+        hlo_module->config().debug_options(), &mlir_context_,
+        ShapeSizeBytesFunction()));
+    RETURN_IF_ERROR(pipeline.Run(hlo_module).status());
+  }
+
+  {
+    HloPassPipeline pipeline("post-autotune-cleanup", compilation_stats);
+    pipeline.AddPass<ConvertTritonGemmConfig>(
+        gpu_topology.gpu_target_config().device_description, &mlir_context_);
+    pipeline.AddPass<LayoutNormalization>(&NormalizeLayoutForGpuCustomCalls);
+    auto simplifier_options = GetAlgebraicSimplifierOptions(
+        AlgebraicSimplifierMode::kLayoutNormalization,
+        hlo_module->config().debug_options(),
+        gpu_topology.gpu_target_config().platform_name == "ROCM");
+    pipeline.AddPass<HloPassFix<GpuAlgebraicSimplifier>>(simplifier_options,
+                                                         gpu_version);
+    RETURN_IF_ERROR(pipeline.Run(hlo_module).status());
+  }
+  {
     HloPassPipeline pipeline("autotune-fusion-emitters", compilation_stats);
     pipeline.AddPass<FusionWrapper>(
         gpu_topology.gpu_target_config().device_description);
@@ -1993,12 +2017,6 @@ absl::Status GpuCompiler::OptimizeHloPostLayoutAssignment(
   // f32).
   add_float_normalization(pipeline);
 
-  TF_RETURN_IF_ERROR(AddConvAndGemmAutotuningPass(
-      &pipeline, hlo_module, gpu_version, options, thread_pool, stream_exec,
-      &gpu_target_config, options.key_value_store,
-      gpu_target_config.device_description.runtime_version(), alias_info,
-      debug_options, &mlir_context_, ShapeSizeBytesFunction()));
-
   // Rewrite GEMMs with broadcasted inputs as strided GEMMs.
   pipeline.AddPass<GemmBroadcastFoldingRewriter>();
 
@@ -2019,8 +2037,6 @@ absl::Status GpuCompiler::OptimizeHloPostLayoutAssignment(
   // normalized again.
   add_float_normalization(pipeline);
 
-  pipeline.AddPass<ConvertTritonGemmConfig>(
-      gpu_target_config.device_description, &mlir_context_);
 
   // Clean up new_tuple described above.
   pipeline.AddPass<TupleSimplifier>();
