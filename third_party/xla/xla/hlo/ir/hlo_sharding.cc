@@ -1171,6 +1171,9 @@ OpSharding HloSharding::ToProto() const {
 /*static*/ NamedSharding HloSharding::ToNamedSharding(
     const HloSharding& sharding) {
   CHECK(!sharding.IsTuple());
+  CHECK(!sharding.IsUnknown());
+  CHECK(!sharding.IsManual());
+  CHECK(!sharding.IsUnreduced());
   if (sharding.UseNamedShardingLeaf()) {
     return sharding.named_sharding();
   }
