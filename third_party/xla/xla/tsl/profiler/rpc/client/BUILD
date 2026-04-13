@@ -77,8 +77,26 @@ cc_library(
         "//xla/tsl/platform:status",
         "//xla/tsl/platform:types",
         "//xla/tsl/profiler/utils:file_system_utils",
+        "@com_google_absl//absl/status",
         "@com_google_absl//absl/strings",
         "@com_google_absl//absl/time",
+        "@tsl//tsl/profiler/protobuf:profiler_service_proto_cc",
+        "@tsl//tsl/profiler/protobuf:xplane_proto_cc",
+    ],
+)
+
+tsl_cc_test(
+    name = "save_profile_test",
+    srcs = ["save_profile_test.cc"],
+    deps = [
+        ":save_profile",
+        "//xla/tsl/platform:env",
+        "//xla/tsl/platform:test",
+        "//xla/tsl/profiler/utils:file_system_utils",
+        "@com_google_absl//absl/status",
+        "@com_google_absl//absl/strings",
+        "@com_google_absl//absl/time",
+        "@com_google_googletest//:gtest_main",
         "@tsl//tsl/profiler/protobuf:profiler_service_proto_cc",
         "@tsl//tsl/profiler/protobuf:xplane_proto_cc",
     ],

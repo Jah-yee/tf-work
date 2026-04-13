@@ -19,13 +19,12 @@ limitations under the License.
 #include <ostream>
 #include <sstream>
 #include <string>
-#include <vector>
 
+#include "absl/status/status.h"
 #include "absl/strings/match.h"
 #include "absl/strings/str_cat.h"
 #include "absl/strings/str_replace.h"
 #include "absl/strings/string_view.h"
-#include "absl/strings/strip.h"
 #include "absl/time/clock.h"
 #include "absl/time/time.h"
 #include "xla/tsl/lib/io/zlib_compression_options.h"
@@ -34,7 +33,6 @@ limitations under the License.
 #include "xla/tsl/platform/errors.h"
 #include "xla/tsl/platform/file_system.h"
 #include "xla/tsl/platform/logging.h"
-#include "xla/tsl/platform/status.h"
 #include "xla/tsl/profiler/utils/file_system_utils.h"
 #include "tsl/profiler/protobuf/profiler_service.pb.h"
 #include "tsl/profiler/protobuf/xplane.pb.h"
@@ -43,7 +41,6 @@ namespace tsl {
 namespace profiler {
 namespace {
 
-constexpr char kProtoTraceFileName[] = "trace";
 constexpr char kTfStatsHelperSuffix[] = "tf_stats_helper_result";
 constexpr char kXPlanePb[] = "xplane.pb";
 
@@ -95,6 +92,29 @@ std::string GetTensorBoardProfilePluginDir(const std::string& logdir) {
   return ProfilerJoinPath(logdir, kPluginName, kProfileName);
 }
 
+std::string GetUniqueHost(Env* env, absl::string_view run_dir,
+                          absl::string_view host) {
+  std::string hostname = absl::StrReplaceAll(host, {{":", "_"}});
+  std::string file_name = absl::StrCat(hostname, ".", kXPlanePb);
+  std::string out_path = ProfilerJoinPath(run_dir, file_name);
+
+  if (!env->FileExists(out_path).ok()) {
+    return hostname;
+  }
+
+  const int kMaxAttempts = 100;
+  for (int i = 1; i <= kMaxAttempts; ++i) {
+    std::string new_hostname = absl::StrCat(hostname, "_", i);
+    std::string new_file_name = absl::StrCat(new_hostname, ".", kXPlanePb);
+    std::string new_out_path = ProfilerJoinPath(run_dir, new_file_name);
+    if (!env->FileExists(new_out_path).ok()) {
+      return new_hostname;
+    }
+  }
+
+  return absl::StrCat(hostname, "_", absl::ToUnixMicros(absl::Now()));
+}
+
 absl::Status SaveProfile(const std::string& repository_root,
                          const std::string& run, const std::string& host,
                          const tensorflow::ProfileResponse& response,
@@ -104,10 +124,11 @@ absl::Status SaveProfile(const std::string& repository_root,
   }
   std::string run_dir;
   TF_RETURN_IF_ERROR(GetOrCreateRunDir(repository_root, run, &run_dir, os));
-  // Windows file names do not support colons.
-  std::string hostname = absl::StrReplaceAll(host, {{":", "_"}});
+
+  std::string unique_hostname = GetUniqueHost(Env::Default(), run_dir, host);
+
   for (const auto& tool_data : response.tool_data()) {
-    TF_RETURN_IF_ERROR(DumpToolData(run_dir, hostname, tool_data, os));
+    TF_RETURN_IF_ERROR(DumpToolData(run_dir, unique_hostname, tool_data, os));
   }
   return absl::OkStatus();
 }
@@ -141,11 +162,10 @@ absl::Status SaveXSpace(const std::string& repository_root,
   std::string log_dir = ProfilerJoinPath(repository_root, run);
   VLOG(1) << "Creating " << log_dir;
   TF_RETURN_IF_ERROR(Env::Default()->RecursivelyCreateDir(log_dir));
-  std::string file_name = absl::StrCat(host, ".", kXPlanePb);
-  // Windows file names do not support colons.
-  absl::StrReplaceAll({{":", "_"}}, &file_name);
 
-  // Dumps profile data to <repository_root>/<run>/<host>_<port>.<kXPlanePb>
+  std::string unique_hostname = GetUniqueHost(Env::Default(), log_dir, host);
+  std::string file_name = absl::StrCat(unique_hostname, ".", kXPlanePb);
+
   std::string out_path = ProfilerJoinPath(log_dir, file_name);
   LOG(INFO) << "Collecting XSpace to repository: " << out_path;
 
