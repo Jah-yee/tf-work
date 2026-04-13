@@ -38,6 +38,7 @@ DumpOptions::DumpOptions(const DebugOptions& opts)
       dump_snapshots(opts.xla_dump_hlo_snapshots()),
       dump_unoptimized_snapshots(opts.xla_dump_hlo_unoptimized_snapshots()),
       dump_include_timestamp(opts.xla_dump_include_timestamp()),
+      dump_hlo_to_subfolder(opts.xla_dump_hlo_to_subfolder()),
       dump_max_hlo_modules(opts.xla_dump_max_hlo_modules()),
       dump_compress_protos(opts.xla_dump_compress_protos()),
       dump_fdo_profiles(opts.xla_gpu_experimental_dump_fdo_profiles()),

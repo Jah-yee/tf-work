@@ -42,6 +42,20 @@ class XlaDumpToDirTest(xla_test.XLATestCase):
     self._compute()
     self.assertNotEmpty(glob.glob(os.path.join(tmp_dir, 'module_0*')))
 
+  def testDumpToSubfolder(self):
+    tmp_dir = self.create_tempdir().full_path
+    os.environ['XLA_FLAGS'] = (
+        f'--xla_dump_to={tmp_dir} --xla_dump_hlo_to_subfolder'
+    )
+    self._compute()
+    subdirs = [
+        d
+        for d in os.listdir(tmp_dir)
+        if os.path.isdir(os.path.join(tmp_dir, d))
+    ]
+    self.assertNotEmpty(subdirs)
+    self.assertNotEmpty(glob.glob(os.path.join(tmp_dir, '*', 'module_0*')))
+
 
 if __name__ == '__main__':
   googletest.main()

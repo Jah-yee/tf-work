@@ -1430,6 +1430,12 @@ void MakeDebugOptionsFlags(std::vector<tsl::Flag>* flag_list,
       "--xla_dump_hlo_as_text and --xla_dump_hlo_as_proto are set, then the "
       "HLO modules will be dumped as text and as protos."));
   flag_list->push_back(tsl::Flag(
+      "xla_dump_hlo_to_subfolder",
+      bool_setter_for(&DebugOptions::set_xla_dump_hlo_to_subfolder),
+      debug_options->xla_dump_hlo_to_subfolder(),
+      "If true, dumps HLO modules in a subfolder titled the HLO module name in "
+      "the directory specified by --xla_dump_to."));
+  flag_list->push_back(tsl::Flag(
       "xla_flags_reset", bool_setter_for(&DebugOptions::set_xla_flags_reset),
       debug_options->xla_flags_reset(),
       "Whether to reset XLA_FLAGS next time to parse."));

@@ -146,6 +146,23 @@ using absl::StrCat;
 using absl::StrFormat;
 using absl::string_view;
 
+static DumpOptions GetDumpOptions(string_view module_name,
+                                  const DebugOptions& debug_options) {
+  DumpOptions opts(debug_options);
+  if (opts.dump_hlo_to_subfolder) {
+    opts.dump_to = tsl::io::JoinPath(
+        opts.dump_to, SanitizeFileName(std::string(module_name)));
+  }
+  return opts;
+}
+
+static DumpOptions GetDumpOptions(const HloModule& module,
+                                  const DebugOptions* override_opts = nullptr) {
+  const DebugOptions& debug_options =
+      override_opts ? *override_opts : module.config().debug_options();
+  return GetDumpOptions(module.name(), debug_options);
+}
+
 // Helper class to hold a list of functions that produces data to be written to
 // a file in multiple stages, so that we can lower the peak memory usage.
 // Ideally we should migrate this whole file to use an I/O stream style API.
@@ -505,7 +522,7 @@ std::vector<std::string> DumpHloModuleIfEnabledImpl(
   const DebugOptions& dump_options = maybe_dump_options
                                          ? *maybe_dump_options
                                          : module.config().debug_options();
-  DumpOptions opts(dump_options);
+  DumpOptions opts = GetDumpOptions(module, maybe_dump_options);
   if (opts.should_dump_module(module.name())) {
     std::vector<std::string> filepaths = DumpHloModuleImpl(
         module, /*buffer_assn=*/buffer_assn,
@@ -837,7 +854,7 @@ std::optional<std::string> DumpNonDefaultDebugOptions(
   std::string filename = FilenameFor(module, "", suffix);
   std::string nonDefaultDebugOptions = GetNonDefaultDebugOptions(debug_options);
   // Options steering where the dump is actually written to can be overriden
-  DumpOptions opts(dump_options ? *dump_options : debug_options);
+  DumpOptions opts = GetDumpOptions(module, dump_options);
   return DumpToFileInDirImpl(filename, nonDefaultDebugOptions, opts);
 }
 
@@ -877,7 +894,7 @@ void DumpHloConfigIfEnabled(const HloModule& module) {
     return;
   }
 
-  DumpOptions opts(module.config().debug_options());
+  DumpOptions opts = GetDumpOptions(module);
   if (opts.dumping_to_stdout()) {
     VLOG(2) << "Refusing to write HLO config proto for " << module.name()
             << " to stdout. Pass --xla_dump_to=<path> to write to a file.";
@@ -916,7 +933,7 @@ bool DumpingToStdout(const DebugOptions& opts) {
 std::vector<std::string> DumpHloModuleBetweenPassesIfEnabled(
     string_view pipeline_name, string_view before_pass_name,
     string_view after_pass_name, const HloModule& module) {
-  DumpOptions opts(module.config().debug_options());
+  DumpOptions opts = GetDumpOptions(module);
   if (!opts.should_dump_module(module.name())) {
     return {};
   }
@@ -944,7 +961,7 @@ std::vector<std::string> DumpHloModuleBetweenPassesIfEnabled(
 void DumpHloModuleDuringPassIfEnabled(string_view pass_name,
                                       string_view step_name,
                                       const HloModule& module) {
-  DumpOptions opts(module.config().debug_options());
+  DumpOptions opts = GetDumpOptions(module);
   if (!opts.should_dump_module(module.name()) ||
       !opts.should_dump_pass(pass_name)) {
     return;
@@ -961,7 +978,7 @@ void DumpHloModuleDuringPassIfEnabled(string_view pass_name,
 
 void DumpHloSnapshotIfEnabled(const HloModule& module,
                               const HloSnapshot& snapshot) {
-  DumpOptions opts(module.config().debug_options());
+  DumpOptions opts = GetDumpOptions(module);
   if (!opts.should_dump_module(module.name()) || !opts.dump_snapshots) {
     return;
   }
@@ -994,8 +1011,8 @@ void DumpHloSnapshotIfEnabled(const HloModule& module,
 
 void DumpHloSnapshotIfEnabled(const HloSnapshot& snapshot,
                               const DebugOptions& opts) {
-  DumpOptions canonical_opts(opts);
   std::string name = snapshot.hlo().hlo_module().name();
+  DumpOptions canonical_opts = GetDumpOptions(name, opts);
   if (!canonical_opts.should_dump_module(name) ||
       !canonical_opts.dump_snapshots) {
     return;
@@ -1026,8 +1043,8 @@ void DumpHloSnapshotIfEnabled(const HloSnapshot& snapshot,
 
 void DumpHloUnoptimizedSnapshotIfEnabled(
     const HloUnoptimizedSnapshot& hlo_snapshot, const DebugOptions& opts) {
-  DumpOptions canonical_opts(opts);
   std::string name = hlo_snapshot.hlo_module().name();
+  DumpOptions canonical_opts = GetDumpOptions(name, opts);
   if (!canonical_opts.dump_unoptimized_snapshots) {
     return;
   }
@@ -1087,7 +1104,7 @@ void DumpHloUnoptimizedSnapshotIfEnabled(
 
 void DumpHloModuleMetadataIfEnabled(HloModule* module) {
   absl::flat_hash_set<int64_t> dumped_module_ids;
-  DumpOptions opts(module->config().debug_options());
+  DumpOptions opts = GetDumpOptions(*module);
   if (!module->config().debug_options().xla_dump_module_metadata()) {
     return;
   }
