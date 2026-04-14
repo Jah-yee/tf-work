@@ -239,6 +239,7 @@ class MultiOutputFusion : public HloModulePass {
   // reachability_ in current computation.
   std::vector<std::pair<HloInstruction*, HloReachabilityMap::Index>>
       all_fusion_candidates_;
+  absl::flat_hash_set<const HloInstruction*> all_fusion_candidates_set_;
 
   // Computation for the pass.
   HloComputation* computation_ = nullptr;
