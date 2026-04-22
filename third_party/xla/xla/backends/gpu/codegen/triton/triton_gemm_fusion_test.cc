@@ -503,7 +503,7 @@ ENTRY entry {
   const HloFusionInstruction* fusion1 = Cast<HloFusionInstruction>(
       module1_and_metadata.computation->FusionInstruction());
   EXPECT_THAT(
-      TritonWrapper("test_fn", fusion1, se::GpuComputeCapability{cc},
+      TritonWrapper("test_fn", *fusion1, se::GpuComputeCapability{cc},
                     device_info, module1_and_metadata.block_level_parameters,
                     target_triple, data_layout, llvm_ctx, mlir_context_),
       absl_testing::StatusIs(
@@ -519,7 +519,7 @@ ENTRY entry {
 
   TF_ASSERT_OK_AND_ASSIGN(
       const auto result,
-      TritonWrapper("test_fn", fusion2, se::GpuComputeCapability{cc},
+      TritonWrapper("test_fn", *fusion2, se::GpuComputeCapability{cc},
                     device_info, module2_and_metadata.block_level_parameters,
                     target_triple, data_layout, llvm_ctx, mlir_context_));
   // Use optin shared memory which is > shared_memory_per_block.
@@ -895,7 +895,7 @@ ENTRY entry {
   const HloFusionInstruction* fusion1 = Cast<HloFusionInstruction>(
       module1_and_metadata.computation->FusionInstruction());
   EXPECT_THAT(
-      TritonWrapper("test_fn", fusion1, se::GpuComputeCapability{cc},
+      TritonWrapper("test_fn", *fusion1, se::GpuComputeCapability{cc},
                     device_info, module1_and_metadata.block_level_parameters,
                     target_triple, data_layout, llvm_ctx, mlir_context_),
       absl_testing::StatusIs(tsl::error::RESOURCE_EXHAUSTED,
@@ -910,7 +910,7 @@ ENTRY entry {
       module1_and_metadata.computation->FusionInstruction());
 
   TF_EXPECT_OK(
-      TritonWrapper("test_fn", fusion2, se::GpuComputeCapability{cc},
+      TritonWrapper("test_fn", *fusion2, se::GpuComputeCapability{cc},
                     device_info, module2_and_metadata.block_level_parameters,
                     target_triple, data_layout, llvm_ctx, mlir_context_)
           .status());
@@ -1966,7 +1966,7 @@ ENTRY e {
   arg0 = f32[5,7] parameter(0)
   arg1 = f32[1,7] parameter(1)
   gemm = (f32[5,1], s8[0]{0}) custom-call(arg0, arg1),
-    custom_call_target="__cublas$gemm",
+    custom_call_target="__cublas$lt$matmul",
     backend_config={"gemm_backend_config": {"alpha_real":1,"beta":0,"dot_dimension_numbers":{"lhs_contracting_dimensions":[1],"rhs_contracting_dimensions":[1],"lhs_batch_dimensions":[],"rhs_batch_dimensions":[]},"alpha_imag":0,"precision_config":{"operand_precision":["DEFAULT","DEFAULT"]},"epilogue":"DEFAULT"}}
   ROOT get-tuple-element = f32[5,1]{1,0} get-tuple-element((f32[5,1]{1,0}, s8[0]{0}) gemm), index=0
 }
@@ -2064,7 +2064,7 @@ ENTRY e {
 
   TF_ASSERT_OK_AND_ASSIGN(
       const auto result,
-      TritonWrapper("test_fn", triton_dot_fusion, GpuComputeCapability(),
+      TritonWrapper("test_fn", *triton_dot_fusion, GpuComputeCapability(),
                     dev_info,
                     optin_shmem_module_and_metadata.block_level_parameters,
                     target_triple, data_layout, llvm_ctx, mlir_context_));
@@ -2724,7 +2724,7 @@ ENTRY e {
   parameter_0 = f32[92,11]{1,0} parameter(0)
   broadcast.2 = f32[11,63]{1,0} broadcast(constant_2), dimensions={}
   gemm = (f32[63,92]{1,0}, s8[0]{0}) custom-call(broadcast.2, parameter_0),
-    custom_call_target="__cublas$gemm",
+    custom_call_target="__cublas$lt$matmul",
     backend_config={"gemm_backend_config": {"alpha_real":1,"beta":0,"dot_dimension_numbers":{"lhs_contracting_dimensions":["0"],"rhs_contracting_dimensions":["1"],"lhs_batch_dimensions":[],"rhs_batch_dimensions":[]},"alpha_imag":0,"precision_config":{"operand_precision":["DEFAULT","DEFAULT"]},"epilogue":"DEFAULT"}}
   ROOT get-tuple-element = f32[63,92]{1,0} get-tuple-element((f32[63,92]{1,0}, s8[0]{0}) gemm), index=0
 })";
@@ -2772,7 +2772,7 @@ ENTRY triton_gemm___computation {
   broadcast = f32[11,61]{1,0} broadcast(constant), dimensions={}
   broadcast.1 = f32[61,45]{1,0} broadcast(constant_1), dimensions={}
   gemm = (f32[11,45]{1,0}, s8[0]{0}) custom-call(broadcast, broadcast.1),
-    custom_call_target="__cublas$gemm",
+    custom_call_target="__cublas$lt$matmul",
     backend_config={"gemm_backend_config": {"alpha_real":1,"beta":0,"dot_dimension_numbers":{"lhs_contracting_dimensions":["1"],"rhs_contracting_dimensions":["0"],"lhs_batch_dimensions":[],"rhs_batch_dimensions":[]},"alpha_imag":0,"precision_config":{"operand_precision":["DEFAULT","DEFAULT"]},"epilogue":"DEFAULT"}}
   ROOT get-tuple-element = f32[11,45]{1,0} get-tuple-element((f32[11,45]{1,0}, s8[0]{0}) gemm), index=0
 })";
@@ -2896,7 +2896,7 @@ ENTRY e {
   fusion.1 = f32[3,32]{1,0} fusion(tmp_7, tmp_5, tmp_1, tmp_2, tmp_3), kind=kLoop, calls=fused_computation.1
   fusion = f32[3,57]{1,0} fusion(tmp_18, tmp_14, tmp_15, tmp_16, tmp_12, /*index=5*/tmp_9, tmp_10), kind=kLoop, calls=fused_computation
   gemm = (f32[32,57]{0,1}, s8[0]{0}) custom-call(fusion.1, fusion),
-    custom_call_target="__cublas$gemm",
+    custom_call_target="__cublas$lt$matmul",
     backend_config={"gemm_backend_config": {"alpha_real":1,"beta":0,"dot_dimension_numbers":{"lhs_contracting_dimensions":["0"],"rhs_contracting_dimensions":["0"],"lhs_batch_dimensions":[],"rhs_batch_dimensions":[]},"alpha_imag":0,"precision_config":{"operand_precision":["DEFAULT","DEFAULT"]},"epilogue":"DEFAULT"}}
   ROOT get-tuple-element = f32[32,57]{0,1} get-tuple-element((f32[32,57]{0,1}, s8[0]{0}) gemm), index=0
 })";
@@ -2962,7 +2962,7 @@ ENTRY e {
   p0 = bf16[92,11]{1,0} parameter(0)
   fusion = bf16[11,63]{1,0} fusion(p1, p2), kind=kLoop, calls=fused_computation
   gemm = (bf16[92,63]{1,0}, s8[0]{0}) custom-call(p0, fusion),
-    custom_call_target="__cublas$gemm",
+    custom_call_target="__cublas$lt$matmul",
     backend_config={"gemm_backend_config": {"alpha_real":1,"beta":0,"dot_dimension_numbers":
       {"lhs_contracting_dimensions":["1"],"rhs_contracting_dimensions":["0"],
       "lhs_batch_dimensions":[],"rhs_batch_dimensions":[]},

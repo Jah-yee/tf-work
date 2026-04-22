@@ -27,6 +27,7 @@ limitations under the License.
 #include "absl/strings/str_format.h"
 #include "absl/strings/string_view.h"
 #include "absl/types/span.h"
+#include "xla/tsl/platform/status_macros.h"
 #include "xla/backends/gpu/collectives/gpu_clique_key.h"
 #include "xla/backends/gpu/collectives/gpu_collectives.h"
 #include "xla/backends/gpu/runtime/collective_thunk.h"
@@ -46,7 +47,6 @@ limitations under the License.
 #include "xla/tsl/platform/errors.h"
 #include "xla/tsl/platform/statusor.h"
 #include "xla/xla_data.pb.h"
-#include "xla/tsl/platform/status_macros.h"
 
 namespace xla {
 namespace gpu {
@@ -61,9 +61,8 @@ RecvThunk::RecvThunk(ThunkInfo thunk_info, const HloRecvInstruction* instr,
 
 RecvThunk::RecvThunk(ThunkInfo thunk_info, const P2PConfig& config,
                      const Buffer& buffer, absl::string_view instr_name)
-    : CollectiveThunk(Thunk::kRecv, thunk_info, CommunicationId(1)),
+    : CollectiveThunk(Thunk::kRecv, thunk_info, {buffer}, CommunicationId(1)),
       config_(config),
-      buffer_(buffer),
       hlo_name_(instr_name) {}
 
 absl::Status RecvThunk::Initialize(const InitializeParams& params) {
@@ -137,7 +136,6 @@ absl::Status RunRecv(DeviceBufferPair& buffer, se::Stream& stream,
   if (source_id) {
     VLOG(3) << "[" << device_ordinal << "] source_id: " << *source_id
             << ", call comm.Recv()";
-    TF_RETURN_IF_ERROR(MaybeRegisterBuffers(stream.parent(), {buffer}, &comm));
     auto future =
         comm.Recv(dest_addr, buffer.element_type, buffer.element_count,
                   RankId(*source_id), GpuCollectives::On(stream));
@@ -156,14 +154,16 @@ absl::Status RunRecv(DeviceBufferPair& buffer, se::Stream& stream,
 absl::Status RecvThunk::RunCollective(const ExecuteParams& params,
                                       const GpuCliqueKey& clique_key,
                                       se::Stream& stream, Communicator& comm) {
+  auto recv_buffer = buffers()[0];
   DeviceBufferPair device_buffer_pair{
       config_.config.operand_element_type[0],
-      buffer_.element_count,
-      params.buffer_allocations->GetDeviceAddress(buffer_.source_buffer.slice),
+      recv_buffer.element_count,
       params.buffer_allocations->GetDeviceAddress(
-          buffer_.destination_buffer.slice),
-      buffer_.source_memory_space,
-      buffer_.destination_memory_space};
+          recv_buffer.source_buffer.slice),
+      params.buffer_allocations->GetDeviceAddress(
+          recv_buffer.destination_buffer.slice),
+      recv_buffer.source_memory_space,
+      recv_buffer.destination_memory_space};
 
   GlobalDeviceId global_device_id = params.collective_params->global_device_id;
 

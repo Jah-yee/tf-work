@@ -63,6 +63,7 @@ limitations under the License.
 #include "xla/pjrt/c/pjrt_c_api_phase_compile_extension.h"
 #include "xla/pjrt/c/pjrt_c_api_profiler_extension.h"
 #include "xla/pjrt/c/pjrt_c_api_shardings_extension.h"
+#include "xla/pjrt/c/pjrt_c_api_status_utils.h"
 #include "xla/pjrt/c/pjrt_c_api_stream_extension.h"
 #include "xla/pjrt/c/pjrt_c_api_tpu_topology_extension.h"
 #include "xla/pjrt/c_api_client/pjrt_c_api_multi_slice_config.h"
@@ -3992,6 +3993,15 @@ void PjRtCApiBuffer::CopyToRemoteDevice(
   PJRT_Transfers_CrossHostRemoteSendCallbackInfo on_done_info =
       pjrt::CppCrossHostRemoteSendCallbackToC(pjrt_c_api(), std::move(on_done));
   args.on_done = on_done_info;
+
+#if PJRT_API_CROSS_HOST_TRANSFERS_EXTENSION_VERSION >= 6
+  // Destructor callback for freeing descriptor data
+  args.descriptor_destructor = [](char** descriptor_data,
+                                  size_t* descriptor_size) {
+    delete descriptor_data;
+    delete descriptor_size;
+  };
+#endif
 
 #if PJRT_API_CROSS_HOST_TRANSFERS_EXTENSION_VERSION < 5
   absl::StatusOr<std::string> descriptor = serialized_descriptor.Await();

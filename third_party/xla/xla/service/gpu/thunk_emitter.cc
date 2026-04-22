@@ -38,6 +38,7 @@ limitations under the License.
 #include "absl/strings/str_format.h"
 #include "absl/strings/string_view.h"
 #include "absl/types/span.h"
+#include "xla/tsl/platform/status_macros.h"
 #include "llvm/ADT/APInt.h"
 #include "llvm/ADT/StringRef.h"
 #include "llvm/IR/Instructions.h"
@@ -62,6 +63,7 @@ limitations under the License.
 #include "xla/backends/gpu/codegen/llvm/llvm_emitter.h"
 #include "xla/backends/gpu/codegen/triton/collective_emitter.h"
 #include "xla/backends/gpu/codegen/triton/fusion.h"
+#include "xla/backends/gpu/codegen/triton/triton_kernel_source.h"
 #include "xla/backends/gpu/codegen/triton/xtile_compiler.h"
 #include "xla/backends/gpu/runtime/all_gather_thunk.h"
 #include "xla/backends/gpu/runtime/all_reduce_thunk.h"
@@ -94,6 +96,7 @@ limitations under the License.
 #include "xla/backends/gpu/runtime/host_to_device_copy_thunk.h"
 #include "xla/backends/gpu/runtime/infeed_thunk.h"
 #include "xla/backends/gpu/runtime/kernel_thunk.h"
+#include "xla/backends/gpu/runtime/legacy_custom_call_thunk.h"
 #include "xla/backends/gpu/runtime/norm_thunk.h"
 #include "xla/backends/gpu/runtime/nvshmem_all_reduce_thunk.h"
 #include "xla/backends/gpu/runtime/nvshmem_collective_permute_thunk.h"
@@ -113,6 +116,9 @@ limitations under the License.
 #include "xla/backends/gpu/runtime/while_thunk.h"
 #include "xla/backends/gpu/transforms/collectives/collective_ops_utils.h"
 #include "xla/codegen/emitters/kernel_arguments.h"
+#include "xla/codegen/kernel_definition.h"
+#include "xla/codegen/kernel_spec.h"
+#include "xla/codegen/llvm_kernel_source.h"
 #include "xla/core/host_offloading/host_offloading_executable.pb.h"
 #include "xla/ffi/attribute_map.h"
 #include "xla/hlo/ir/hlo_casting_utils.h"
@@ -174,10 +180,35 @@ limitations under the License.
 #include "tsl/platform/casts.h"
 #include "tsl/platform/human_readable_json.h"
 #include "triton/Dialect/Triton/IR/Dialect.h"
-#include "xla/tsl/platform/status_macros.h"
 
 namespace xla::gpu {
 namespace {
+
+absl::StatusOr<TritonKernelSource> EmitTritonFrom(
+    const TritonCall& call, const std::string& kernel_name,
+    mlir::MLIRContext& mlir_context) {
+  VLOG(3) << "Generating: " << kernel_name;
+
+  mlir::OwningOpRef<mlir::ModuleOp> triton_module;
+  {
+    mlir::BaseScopedDiagnosticHandler diagnostic_handler(&mlir_context);
+    triton_module =
+        mlir::parseSourceString<mlir::ModuleOp>(call.ir, &mlir_context);
+    if (!triton_module) {
+      return absl::InvalidArgumentError(
+          absl::StrCat("Failed to parse Triton module: ",
+                       diagnostic_handler.ConsumeStatus().message(),
+                       "\ninput ir: \"", absl::CHexEscape(call.ir), "\""));
+    }
+  }
+
+  auto triton_fn = triton_module->lookupSymbol<mlir::triton::FuncOp>(call.name);
+  TF_RET_CHECK(triton_fn) << "Call name not found in the Triton module: "
+                          << call.name;
+  triton_fn.setName(kernel_name);
+
+  return TritonKernelSource(std::move(triton_module));
+}
 
 struct EmitCollectiveResult {
   std::unique_ptr<CollectiveKernelThunk> thunk;
@@ -361,30 +392,57 @@ AsyncThunkSequence ThunkEmitter::EmitConditional(const HloInstruction* instr) {
 
 // Input = {dynamic array(with dynamic dimension meta data at the end)}
 // Output = {static array, dynamic_dim0, dynamic_dim1}
-absl::StatusOr<ThunkSequence> ThunkEmitter::EmitPadToStatic(
+AsyncThunkSequence ThunkEmitter::EmitPadToStatic(
     const HloCustomCallInstruction* instr) {
-  std::string ir_name = std::string(instr->name());
-  auto local_llvm_module = ir_emitter_context_->CreateLLVMModule(ir_name);
+  ASSIGN_OR_RETURN(emitters::KernelArguments kernel_arguments,
+                   emitters::KernelArguments::Create(
+                       ir_emitter_context_->buffer_assignment(),
+                       GetDefaultBufferAlignment(), instr));
 
-  TF_ASSIGN_OR_RETURN(auto thunk_sequence,
-                      EmitPadToStaticLLVMIR(instr, local_llvm_module.get(),
-                                            ir_emitter_context_));
-  kernel_modules_.push_back(std::move(local_llvm_module));
-  return thunk_sequence;
+  ASSIGN_OR_RETURN(
+      KernelDefinition<LlvmKernelSource> kernel_def,
+      EmitPadToStaticLLVMIR(instr, ir_emitter_context_, kernel_arguments));
+
+  KernelSpec spec = kernel_def.spec();
+  ASSIGN_OR_RETURN(
+      LaunchDimensions launch_dimensions,
+      LaunchDimensions::FromWorkDimensions(spec.work_dimensions()));
+
+  return ir_emitter_context_->kernel_compiler()
+      ->Compile(Thunk::ThunkInfo::WithProfileAnnotation(
+                    instr, ir_emitter_context_->GetNextThunkId()),
+                std::move(kernel_def).TakeSource(), std::string(spec.name()),
+                kernel_arguments, launch_dimensions)
+      .Map([](std::unique_ptr<Thunk> thunk) {
+        return ThunkSequence::Of(std::move(thunk));
+      });
 }
 
 // Input = {dynamic array(with dynamic dimension meta data at the end)}
 // Output = {static array, dynamic_dim0, dynamic_dim1}
-absl::StatusOr<ThunkSequence> ThunkEmitter::EmitSliceToDynamic(
+AsyncThunkSequence ThunkEmitter::EmitSliceToDynamic(
     const HloCustomCallInstruction* instr) {
-  std::string ir_name = std::string(instr->name());
-  auto local_llvm_module = ir_emitter_context_->CreateLLVMModule(ir_name);
+  ASSIGN_OR_RETURN(emitters::KernelArguments kernel_arguments,
+                   emitters::KernelArguments::Create(
+                       ir_emitter_context_->buffer_assignment(),
+                       GetDefaultBufferAlignment(), instr));
+  ASSIGN_OR_RETURN(
+      KernelDefinition<LlvmKernelSource> kernel_def,
+      EmitSliceToDynamicLLVMIR(instr, ir_emitter_context_, kernel_arguments));
 
-  TF_ASSIGN_OR_RETURN(auto thunk_sequence,
-                      EmitSliceToDynamicLLVMIR(instr, local_llvm_module.get(),
-                                               ir_emitter_context_));
-  kernel_modules_.push_back(std::move(local_llvm_module));
-  return thunk_sequence;
+  KernelSpec spec = kernel_def.spec();
+  ASSIGN_OR_RETURN(
+      LaunchDimensions launch_dimensions,
+      LaunchDimensions::FromWorkDimensions(spec.work_dimensions()));
+
+  return ir_emitter_context_->kernel_compiler()
+      ->Compile(Thunk::ThunkInfo::WithProfileAnnotation(
+                    instr, ir_emitter_context_->GetNextThunkId()),
+                std::move(kernel_def).TakeSource(), std::string(spec.name()),
+                kernel_arguments, launch_dimensions)
+      .Map([](std::unique_ptr<Thunk> thunk) {
+        return ThunkSequence::Of(std::move(thunk));
+      });
 }
 
 absl::StatusOr<ThunkSequence> ThunkEmitter::EmitConvolutionThunk(
@@ -947,7 +1005,7 @@ absl::StatusOr<ThunkSequence> ThunkEmitter::EmitCustomCallThunk(
             << "Fall back to parse the raw backend config str.";
   }
 
-  auto ffi_thunk = [&]() -> absl::StatusOr<std::unique_ptr<CustomCallThunk>> {
+  auto ffi_thunk = [&]() -> absl::StatusOr<std::unique_ptr<Thunk>> {
     auto& called_computations = instr->called_computations();
     auto& backend_config_str =
         backend_config.ok()
@@ -978,13 +1036,12 @@ absl::StatusOr<ThunkSequence> ThunkEmitter::EmitCustomCallThunk(
         ir_emitter_context_->cpu_target_machine_options());
   };
 
-  auto legacy_thunk =
-      [&]() -> absl::StatusOr<std::unique_ptr<CustomCallThunk>> {
+  auto legacy_thunk = [&]() -> absl::StatusOr<std::unique_ptr<Thunk>> {
     std::string opaque =
         backend_config.ok()
             ? backend_config->custom_call_backend_config().opaque()
             : instr->raw_backend_config_string();
-    return CustomCallThunk::Create(
+    return LegacyCustomCallThunk::Create(
         Thunk::ThunkInfo::WithProfileAnnotation(
             instr, ir_emitter_context_->GetNextThunkId()),
         call_target_name, std::move(operands), std::move(results),
@@ -992,7 +1049,7 @@ absl::StatusOr<ThunkSequence> ThunkEmitter::EmitCustomCallThunk(
         ir_emitter_context_->platform_name());
   };
 
-  absl::StatusOr<std::unique_ptr<CustomCallThunk>> custom_call_thunk =
+  absl::StatusOr<std::unique_ptr<Thunk>> custom_call_thunk =
       is_ffi_custom_call ? ffi_thunk() : legacy_thunk();
 
   ThunkSequence thunks;
@@ -1175,29 +1232,13 @@ absl::StatusOr<ThunkSequence> ThunkEmitter::EmitTritonCustomCall(
   auto generate = [this, &instr,
                    &mlir_context]() -> absl::StatusOr<KernelReuseCache::Entry> {
     LoadMlirDialectsForTriton(mlir_context);
-    auto call =
+    TritonCall call =
         TritonCall::Parse(instr->raw_backend_config_string(), &mlir_context);
-    auto kernel_name = ir_emitter_context_->GetSanitizedUniqueName(call.name);
-    VLOG(3) << "Generating: " << kernel_name;
+    std::string kernel_name =
+        ir_emitter_context_->GetSanitizedUniqueName(call.name);
 
-    mlir::OwningOpRef<mlir::ModuleOp> triton_module;
-    {
-      mlir::BaseScopedDiagnosticHandler diagnostic_handler(&mlir_context);
-      triton_module =
-          mlir::parseSourceString<mlir::ModuleOp>(call.ir, &mlir_context);
-      if (!triton_module) {
-        return absl::InvalidArgumentError(
-            absl::StrCat("Failed to parse Triton module: ",
-                         diagnostic_handler.ConsumeStatus().message(),
-                         "\ninput ir: \"", absl::CHexEscape(call.ir), "\""));
-      }
-    }
-
-    auto triton_fn =
-        triton_module->lookupSymbol<mlir::triton::FuncOp>(call.name);
-    TF_RET_CHECK(triton_fn)
-        << "Call name not found in the Triton module: " << call.name;
-    triton_fn.setName(kernel_name);
+    ASSIGN_OR_RETURN(TritonKernelSource triton_source,
+                     EmitTritonFrom(call, kernel_name, mlir_context));
 
     HloModule* hlo_module = instr->GetModule();
     // If emit_kernels if false (i.e., when deserializing an already
@@ -1216,20 +1257,19 @@ absl::StatusOr<ThunkSequence> ThunkEmitter::EmitTritonCustomCall(
         call.global_scratch_memory_size;
     block_level_parameters.is_tma_allowed = call.is_tma_allowed;
 
-    TF_ASSIGN_OR_RETURN(
-        auto result,
-        CompileTritonToLLVM(kernel_name, *hlo_module,
-                            ir_emitter_context_->gpu_device_info(),
-                            block_level_parameters, triton_module.get(),
-                            ir_emitter_context_->target_triple(),
-                            ir_emitter_context_->data_layout(),
-                            *ir_emitter_context_->llvm_context(), mlir_context,
-                            /*is_xla_fusion=*/false, emit_kernels));
+    ASSIGN_OR_RETURN(
+        TritonWrapperResult result,
+        CompileTritonToLLVM(
+            kernel_name, *hlo_module, ir_emitter_context_->gpu_device_info(),
+            block_level_parameters, ir_emitter_context_->target_triple(),
+            ir_emitter_context_->data_layout(), std::move(triton_source),
+            *ir_emitter_context_->llvm_context(), mlir_context,
+            /*is_xla_fusion=*/false, emit_kernels));
 
-    TF_ASSIGN_OR_RETURN(auto kernel_arguments,
-                        emitters::KernelArguments::Create(
-                            ir_emitter_context_->buffer_assignment(),
-                            GetDefaultBufferAlignment(), instr));
+    ASSIGN_OR_RETURN(auto kernel_arguments,
+                     emitters::KernelArguments::Create(
+                         ir_emitter_context_->buffer_assignment(),
+                         GetDefaultBufferAlignment(), instr));
     auto launch_dimensions = LaunchDimensions(
         se::BlockDim(call.grid_x, call.grid_y, call.grid_z),
         se::ThreadDim(
@@ -1237,11 +1277,10 @@ absl::StatusOr<ThunkSequence> ThunkEmitter::EmitTritonCustomCall(
             ir_emitter_context_->gpu_device_info().threads_per_warp()));
 
     if (emit_kernels) {
-      TF_ASSIGN_OR_RETURN(
-          llvm::Function * kernel,
-          RemoveUnusedTritonAbiArguments(result.llvm_module.get(),
-                                         *ir_emitter_context_, kernel_name,
-                                         call.global_scratch_memory_size > 0));
+      ASSIGN_OR_RETURN(llvm::Function * kernel,
+                       RemoveUnusedTritonAbiArguments(
+                           result.llvm_module.get(), *ir_emitter_context_,
+                           kernel_name, call.global_scratch_memory_size > 0));
 
       AnnotateAttrsIfUnset(kernel_arguments, *kernel);
       TF_RETURN_IF_ERROR(AnnotateKernelLaunchDimensions(
@@ -1307,8 +1346,7 @@ absl::StatusOr<ThunkSequence> ThunkEmitter::EmitAsyncComputation(
   return GetThunkSequence(std::move(start_thunk));
 }
 
-absl::StatusOr<ThunkSequence> ThunkEmitter::EmitFusion(
-    const HloFusionInstruction* instr) {
+AsyncThunkSequence ThunkEmitter::EmitFusion(const HloFusionInstruction* instr) {
   const se::DeviceDescription& device_info =
       ir_emitter_context_->gpu_device_info();
   const HloFusionAnalysis fusion_analysis =
@@ -1321,7 +1359,7 @@ absl::StatusOr<ThunkSequence> ThunkEmitter::EmitFusion(
           &ir_emitter_context_->buffer_assignment(),
           /*call_graph=*/*call_graph_),
       ir_emitter_context_->mlir_context());
-  TF_ASSIGN_OR_RETURN(auto result, emitter->Emit(*ir_emitter_context_, *instr));
+  ASSIGN_OR_RETURN(auto result, emitter->Emit(*ir_emitter_context_, *instr));
 
   // Use override flag because libdevice functions can be present in both.
   if (result.module) {
@@ -1352,7 +1390,8 @@ absl::StatusOr<ThunkSequence> ThunkEmitter::EmitCopy(
 absl::StatusOr<ThunkSequence> ThunkEmitter::EmitAsyncCustomCallStart(
     const HloInstruction* instr) {
   const HloInstruction* wrapped = instr->async_wrapped_instruction();
-  TF_ASSIGN_OR_RETURN(auto custom_call_thunks, EmitCustomCallSwitch(wrapped));
+  ASSIGN_OR_RETURN(auto custom_call_thunks,
+                   EmitCustomCallSwitch(wrapped).Await());
 
   auto* async_start = Cast<HloAsyncInstruction>(instr);
   const ExecutionStreamAssignment& stream_assignment =
@@ -1423,20 +1462,33 @@ AsyncThunkSequence ThunkEmitter::EmitCallComputation(
   return EmitHloComputation(computation);
 }
 
-absl::StatusOr<ThunkSequence> ThunkEmitter::EmitRngGetAndUpdateState(
+AsyncThunkSequence ThunkEmitter::EmitRngGetAndUpdateState(
     const HloRngGetAndUpdateStateInstruction* instr) {
-  std::string ir_name = std::string(instr->name());
-  auto local_llvm_module = ir_emitter_context_->CreateLLVMModule(ir_name);
+  ASSIGN_OR_RETURN(emitters::KernelArguments kernel_arguments,
+                   emitters::KernelArguments::Create(
+                       ir_emitter_context_->buffer_assignment(),
+                       GetDefaultBufferAlignment(), instr));
 
-  TF_ASSIGN_OR_RETURN(auto thunk_sequence,
-                      EmitRngGetAndUpdateStateLLVMIR(
-                          instr, local_llvm_module.get(), ir_emitter_context_));
-  kernel_modules_.push_back(std::move(local_llvm_module));
-  return thunk_sequence;
+  ASSIGN_OR_RETURN(KernelDefinition<LlvmKernelSource> kernel_def,
+                   EmitRngGetAndUpdateStateLLVMIR(instr, ir_emitter_context_,
+                                                  kernel_arguments));
+
+  KernelSpec spec = kernel_def.spec();
+  ASSIGN_OR_RETURN(
+      LaunchDimensions launch_dimensions,
+      LaunchDimensions::FromWorkDimensions(spec.work_dimensions()));
+
+  return ir_emitter_context_->kernel_compiler()
+      ->Compile(Thunk::ThunkInfo::WithProfileAnnotation(
+                    instr, ir_emitter_context_->GetNextThunkId()),
+                std::move(kernel_def).TakeSource(), std::string(spec.name()),
+                kernel_arguments, launch_dimensions)
+      .Map([](std::unique_ptr<Thunk> thunk) {
+        return ThunkSequence::Of(std::move(thunk));
+      });
 }
 
-absl::StatusOr<ThunkSequence> ThunkEmitter::EmitSort(
-    const HloSortInstruction* sort) {
+AsyncThunkSequence ThunkEmitter::EmitSort(const HloSortInstruction* sort) {
   std::string op_name(sort->name());
   const Shape& keys_shape = sort->operand(0)->shape();
   ThunkSequence thunks;
@@ -1458,10 +1510,10 @@ absl::StatusOr<ThunkSequence> ThunkEmitter::EmitSort(
     // If possible, we share buffers. If that is not possible, we
     // need to copy the values, because the emitter does the sorting
     // in-place.
-    TF_ASSIGN_OR_RETURN(destination_buffer,
-                        GetAllocationSliceForHlo(sort, shape_index));
-    TF_ASSIGN_OR_RETURN(source_address,
-                        GetAllocationSliceForHlo(sort->operand(i), {}));
+    ASSIGN_OR_RETURN(destination_buffer,
+                     GetAllocationSliceForHlo(sort, shape_index));
+    ASSIGN_OR_RETURN(source_address,
+                     GetAllocationSliceForHlo(sort->operand(i), {}));
 
     if (destination_buffer != source_address) {
       // TODO(b/26783907): Figure out why we never seem to share
@@ -1478,10 +1530,11 @@ absl::StatusOr<ThunkSequence> ThunkEmitter::EmitSort(
     }
   }
 
-  ASSIGN_OR_RETURN(ThunkSequence sort_thunks,
-                   EmitBitonicSortLLVMIR(sort, ir_emitter_context_));
-  AppendThunkSequence(thunks, sort_thunks);
-  return thunks;
+  return EmitBitonicSortLLVMIR(sort, ir_emitter_context_)
+      .Map([thunks = std::move(thunks)](ThunkSequence sort_thunks) mutable {
+        AppendThunkSequence(thunks, sort_thunks);
+        return std::move(thunks);
+      });
 }
 
 template <typename ThunkType>
@@ -2462,14 +2515,14 @@ AsyncThunkSequence ThunkEmitter::EmitAsyncStart(const HloInstruction* instr) {
           std::nullopt);
     }
     case HloOpcode::kFusion: {
-      TF_ASSIGN_OR_RETURN(ThunkSequence fusion_thunks,
-                          EmitFusion(Cast<HloFusionInstruction>(wrapped)));
+      ASSIGN_OR_RETURN(ThunkSequence fusion_thunks,
+                       EmitFusion(Cast<HloFusionInstruction>(wrapped)).Await());
 
       auto* async_start = Cast<HloAsyncInstruction>(instr);
       const ExecutionStreamAssignment& stream_assignment =
           ir_emitter_context_->execution_stream_assignment();
-      TF_ASSIGN_OR_RETURN(ExecutionStreamId execution_stream_id,
-                          stream_assignment.GetExecutionStreamId(async_start));
+      ASSIGN_OR_RETURN(ExecutionStreamId execution_stream_id,
+                       stream_assignment.GetExecutionStreamId(async_start));
 
       auto start_thunk = std::make_unique<AsyncStartThunk>(
           Thunk::ThunkInfo::WithProfileAnnotation(
@@ -2483,7 +2536,7 @@ AsyncThunkSequence ThunkEmitter::EmitAsyncStart(const HloInstruction* instr) {
                         wrapped->ToString());
       }
 
-      return GetThunkSequence(std::move(start_thunk));
+      return ThunkSequence::Of(std::move(start_thunk));
     }
     case HloOpcode::kCall: {
       return EmitAsyncComputation(instr);
@@ -2560,7 +2613,7 @@ AsyncThunkSequence ThunkEmitter::EmitAsyncStart(const HloInstruction* instr) {
   }
 }
 
-absl::StatusOr<ThunkSequence> ThunkEmitter::EmitCustomCallSwitch(
+AsyncThunkSequence ThunkEmitter::EmitCustomCallSwitch(
     const HloInstruction* hlo) {
   auto* custom_call = Cast<HloCustomCallInstruction>(hlo);
   if (IsLegacyCublasMatmul(*hlo)) {

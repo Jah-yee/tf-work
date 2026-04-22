@@ -293,7 +293,9 @@ cc_library(
         "@com_google_absl//absl/log:check",
         "@com_google_absl//absl/status",
         "@com_google_absl//absl/status:statusor",
+        "@com_google_absl//absl/strings:cord",
         "@com_google_absl//absl/strings:str_format",
+        "@com_google_absl//absl/strings:string_view",
         "@com_google_absl//absl/synchronization",
         "@tsl//tsl/profiler/lib:traceme",
     ],
@@ -306,14 +308,13 @@ cc_library(
     visibility = internal_visibility([":friends"]),
     deps = [
         "//xla/pjrt/c:pjrt_c_api_hdrs",
-        "//xla/pjrt/c:pjrt_c_api_helpers",
+        "//xla/pjrt/c:pjrt_c_api_status_utils",
         "//xla/tsl/platform:errors",
         "@com_google_absl//absl/container:flat_hash_map",
         "@com_google_absl//absl/log",
         "@com_google_absl//absl/status",
         "@com_google_absl//absl/status:statusor",
         "@com_google_absl//absl/strings",
-        "@tsl//tsl/platform",
     ],
 )
 
@@ -774,6 +775,7 @@ xla_cc_test(
         ":pjrt_common",
         ":pjrt_executable",
         ":stream_executor_executable",
+        "//xla/pjrt/proto:pjrt_abi_version_proto_cc",
         "//xla/service:compiled_module",
         "//xla/service:mock_compiled_module",
         "//xla/stream_executor/abi:executable_abi_version",
@@ -1428,6 +1430,9 @@ cc_library(
     visibility = internal_visibility([":friends"]),
     deps = [
         "//xla:future",
+        "//xla/pjrt/c:pjrt_c_api_device_event_hdrs",
+        "//xla/pjrt/c:pjrt_c_api_hdrs",
+        "//xla/pjrt/c:pjrt_c_api_status_utils",
         "//xla/tsl/concurrency:async_value",
         "//xla/tsl/concurrency:ref_count",
         "@com_google_absl//absl/functional:any_invocable",

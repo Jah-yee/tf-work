@@ -818,8 +818,8 @@ message DebugOptions {
   // When possible, XLA will use Triton's auto warp specialization feature.
   optional bool xla_gpu_experimental_enable_triton_warp_specialization = 421;
 
-  // Force a specific split_k. Must be a power of two. Zero (default) means do
-  // not force split_k and use the heuristic.
+  // Force a specific split_k. Zero (default) means do not force split_k and use
+  // the heuristic.
   optional int32 xla_gpu_experimental_force_split_k = 472;
 
   // Controls max unroll factor on Blackwell architectures. This is also
@@ -1288,6 +1288,10 @@ message DebugOptions {
 
   // Include a timestamp in the dumped filenames.
   optional bool xla_dump_include_timestamp = 131;
+
+  // If true, dumps HLO modules in a subfolder titled the HLO module name in the
+  // directory specified by --xla_dump_to.
+  optional bool xla_dump_hlo_to_subfolder = 502;
 
   // Max number of hlo module dumps in a directory. Set to < 0 for unbounded.
   optional int32 xla_dump_max_hlo_modules = 132;

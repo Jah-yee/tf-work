@@ -197,6 +197,7 @@ DebugOptions DefaultDebugOptionsIgnoringFlags() {
   opts.set_xla_dump_hlo_as_html(false);
   opts.set_xla_dump_fusion_visualization(false);
   opts.set_xla_dump_include_timestamp(false);
+  opts.set_xla_dump_hlo_to_subfolder(false);
   opts.set_xla_dump_max_hlo_modules(-1);
   opts.set_xla_dump_module_metadata(false);
   opts.set_xla_dump_hlo_as_long_text(true);
@@ -457,7 +458,7 @@ DebugOptions DefaultDebugOptionsIgnoringFlags() {
   opts.set_xla_gpu_enable_scatter_determinism_expander(false);
   opts.set_xla_gpu_unsupported_enable_all_reduce_decomposer(false);
   opts.set_xla_gpu_unsupported_enable_ragged_all_to_all_decomposer(false);
-  opts.set_xla_gpu_unsupported_use_all_reduce_one_shot_kernel(false);
+  opts.set_xla_gpu_unsupported_use_all_reduce_one_shot_kernel(true);
   opts.set_xla_gpu_unsupported_use_ragged_all_to_all_one_shot_kernel(true);
   opts.set_xla_gpu_experimental_enable_fusion_autotuner(true);
   opts.set_xla_gpu_experimental_max_unroll_factor(32);
@@ -1038,20 +1039,6 @@ void MakeDebugOptionsFlags(std::vector<tsl::Flag>* flag_list,
         };
       };
 
-  auto setter_for_force_split_k = [debug_options](int32_t value) {
-    if (value < 0) {
-      return false;
-    }
-    // TODO: Replace with std::has_single_bit once we are C++20.
-    if (value > 0 && (value & (value - 1)) != 0) {
-      LOG(ERROR)
-          << "xla_gpu_experimental_force_split_k must be a power of two.";
-      return false;
-    }
-    debug_options->set_xla_gpu_experimental_force_split_k(value);
-    return true;
-  };
-
   // Don't use an initializer list for initializing the vector; this would
   // create a temporary copy, and exceeds the stack space when compiling with
   // certain configurations.
@@ -1552,6 +1539,12 @@ void MakeDebugOptionsFlags(std::vector<tsl::Flag>* flag_list,
                 bool_setter_for(&DebugOptions::set_xla_dump_include_timestamp),
                 debug_options->xla_dump_include_timestamp(),
                 "If specified, includes a timestamp in the dumped filenames."));
+  flag_list->push_back(tsl::Flag(
+      "xla_dump_hlo_to_subfolder",
+      bool_setter_for(&DebugOptions::set_xla_dump_hlo_to_subfolder),
+      debug_options->xla_dump_hlo_to_subfolder(),
+      "If true, dumps HLO modules in a subfolder titled the HLO module "
+      "name in the directory specified by --xla_dump_to."));
   flag_list->push_back(
       tsl::Flag("xla_dump_max_hlo_modules",
                 int32_setter_for(&DebugOptions::set_xla_dump_max_hlo_modules),
@@ -2841,11 +2834,12 @@ void MakeDebugOptionsFlags(std::vector<tsl::Flag>* flag_list,
       "If non empty will interpret this variable as a path for performance "
       "tables for matmuls. Expects `xla.gpu.DeviceHloInstructionProfiles` "
       "proto."));
-  flag_list->push_back(
-      tsl::Flag("xla_gpu_experimental_force_split_k", setter_for_force_split_k,
-                debug_options->xla_gpu_experimental_force_split_k(),
-                "Force a specific split_k value. Must be a power of two. Zero "
-                "(default) means do not force split_k and use the heuristic."));
+  flag_list->push_back(tsl::Flag(
+      "xla_gpu_experimental_force_split_k",
+      int32_setter_for(&DebugOptions::set_xla_gpu_experimental_force_split_k),
+      debug_options->xla_gpu_experimental_force_split_k(),
+      "Force a specific split_k value. Zero (default) means do not force "
+      "split_k and use the heuristic."));
   flag_list->push_back(tsl::Flag(
       "xla_gpu_experimental_enable_triton_warp_specialization",
       bool_setter_for(
@@ -3145,6 +3139,21 @@ xla::DebugOptions GetDebugOptionsFromFlags() {
                                      /*reset_envvar=*/true);
   }
   return *flag_values;
+}
+
+DebugOptions GetDebugOptionsFromProtoAndFlags(
+    DebugOptions* proto_debug_options) {
+  if (proto_debug_options != nullptr) {
+    DebugOptions debug_options = *proto_debug_options;
+    // Apply overrides from XLA_FLAGS environment variable.
+    std::vector<tsl::Flag> flag_list;
+    MakeDebugOptionsFlags(&flag_list, &debug_options);
+    ParseFlagsFromEnvAndDieIfUnknown("XLA_FLAGS", flag_list,
+                                     /*reset_envvar=*/true);
+    return debug_options;
+  }
+
+  return GetDebugOptionsFromFlags();
 }
 
 // LINT.IfChange(get_flag_status)

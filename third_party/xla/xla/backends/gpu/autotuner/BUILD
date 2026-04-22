@@ -372,71 +372,6 @@ xla_test(
 )
 
 cc_library(
-    name = "custom_kernel",
-    srcs = ["custom_kernel.cc"],
-    hdrs = ["custom_kernel.h"],
-    deps = [
-        ":gpu_codegen_backend",
-        "//xla:autotune_results_proto_cc",
-        "//xla:autotuning_proto_cc",
-        "//xla:xla_proto_cc",
-        "//xla/backends/autotuner:backends_proto_cc",
-        "//xla/backends/autotuner:codegen_backend",
-        "//xla/backends/gpu/codegen/kernels:custom_kernel",
-        "//xla/backends/gpu/codegen/kernels:custom_kernel_fusion",
-        "//xla/hlo/ir:hlo",
-        "//xla/service:compiler",
-        "//xla/service/gpu:backend_configs_cc",
-        "//xla/service/gpu:ir_emission_utils",
-        "//xla/stream_executor:device_description",
-        "//xla/stream_executor:stream_executor_h",
-        "//xla/tsl/platform:errors",
-        "//xla/tsl/platform:statusor",
-        "@com_google_absl//absl/log",
-        "@com_google_absl//absl/status",
-        "@com_google_absl//absl/status:statusor",
-        "@com_google_absl//absl/strings",
-    ],
-)
-
-xla_test(
-    name = "custom_kernel_test",
-    srcs = ["custom_kernel_test.cc"],
-    backends = [
-        "a100",
-        "h100",
-        "b200",
-        "amdgpu_any",
-    ],
-    tags = [
-        "gpu",
-        "no_mac",
-    ],
-    use_legacy_runtime = True,
-    deps = [
-        ":custom_kernel",
-        "//xla:autotuning_proto_cc",
-        "//xla:xla_proto_cc",
-        "//xla/backends/autotuner:codegen_backend",
-        "//xla/hlo/ir:hlo",
-        "//xla/hlo/testlib:filecheck",
-        "//xla/hlo/testlib:hlo_hardware_independent_test_base",
-        "//xla/service:compiler",
-        "//xla/service:platform_util",
-        "//xla/stream_executor:device_description_proto_cc",
-        "//xla/stream_executor:platform",
-        "//xla/stream_executor:stream_executor_h",
-        "//xla/tsl/lib/core:status_test_util",
-        "//xla/tsl/platform:statusor",
-        "//xla/tsl/util/proto:proto_matchers",
-        "@com_google_absl//absl/status",
-        "@com_google_absl//absl/status:status_matchers",
-        "@com_google_absl//absl/status:statusor",
-        "@com_google_googletest//:gtest_main",
-    ],
-)
-
-cc_library(
     name = "triton",
     srcs = ["triton.cc"],
     hdrs = ["triton.h"],
@@ -467,7 +402,6 @@ cc_library(
         "//xla/service/gpu:gpu_float_support",
         "//xla/service/gpu:ir_emission_utils",
         "//xla/service/gpu:matmul_utils",
-        "//xla/service/gpu:split_k_gemm_rewriter",
         "//xla/service/gpu/model:triton_emitter_constraints",
         "//xla/stream_executor:device_description",
         "//xla/stream_executor:stream_executor_h",
@@ -509,11 +443,13 @@ xla_test(
         "//xla:autotuning_proto_cc",
         "//xla:xla_proto_cc",
         "//xla/backends/autotuner:codegen_backend",
+        "//xla/backends/gpu/target_config",
         "//xla/hlo/analysis:symbolic_map",
         "//xla/hlo/ir:hlo",
         "//xla/hlo/testlib:hlo_hardware_independent_test_base",
         "//xla/service:compiler",
         "//xla/service:executable",
+        "//xla/service:hlo_module_config",
         "//xla/service:platform_util",
         "//xla/service/gpu:alias_info",
         "//xla/stream_executor:device_description",
@@ -649,14 +585,12 @@ cc_library(
         ":cublas",
         ":cublaslt",
         ":cudnn",
-        ":custom_kernel",
         ":factory",
         ":fission_backend",
         ":triton",
         "//xla:xla_proto_cc",
         "//xla/backends/autotuner:backends_proto_cc",
         "//xla/backends/autotuner:codegen_backend",
-        "//xla/backends/gpu/transforms:custom_kernel_fusion_rewriter",
         "//xla/backends/gpu/transforms:dot_algorithm_rewriter",
         "//xla/backends/gpu/transforms:gemm_rewriter",
         "//xla/backends/gpu/transforms:scaled_dot_rewriter",
@@ -753,7 +687,6 @@ cc_library(
 
 xla_test(
     name = "hipblaslt_mx_execution_test",
-    timeout = "long",
     srcs = ["hipblaslt_mx_execution_test.cc"],
     backends = [
         "amdgpu_any",
@@ -777,7 +710,6 @@ xla_test(
 
 xla_test(
     name = "hipblaslt_test",
-    timeout = "long",
     srcs = ["hipblaslt_test.cc"],
     backends = [
         "amdgpu_any",
@@ -1001,7 +933,6 @@ xla_test(
     tags = ["gpu"],
     use_legacy_runtime = True,
     deps = [
-        ":custom_kernel",
         ":fission_backend",
         ":gpu_codegen_backend",
         "//xla:autotune_results_proto_cc",
@@ -1009,7 +940,6 @@ xla_test(
         "//xla:xla_proto_cc",
         "//xla/backends/autotuner:backends_proto_cc",
         "//xla/backends/autotuner:codegen_backend",
-        "//xla/backends/gpu/transforms:custom_kernel_fusion_rewriter",
         "//xla/backends/gpu/transforms:dot_algorithm_rewriter",
         "//xla/backends/gpu/transforms:gemm_rewriter",
         "//xla/backends/gpu/transforms:scaled_dot_rewriter",
@@ -1163,11 +1093,11 @@ xla_cc_binary(
 )
 
 xla_test(
-    name = "autotuner_main_tap_test",
+    name = "autotuner_main_test",
     srcs = ["autotuner_main.cc"],
-    args = ["--hlo_file=$(location autotuner_main.hlo)"],
+    args = ["--hlo_file=$(location test.hlo)"],
     backends = ["gpu"],
-    data = ["autotuner_main.hlo"],
+    data = ["test.hlo"],
     fail_if_no_test_linked = False,  # NOLINT=not based on gtest and thus doesn't support --gunit_fail_if_no_test_linked.
     fail_if_no_test_selected = False,  # NOLINT=not based on gtest and thus doesn't support --gunit_fail_if_no_test_selected.
     shuffle_tests = False,  # CANNOT_SHUFFLE_TESTS=not based on gtest and thus doesn't support shuffling.

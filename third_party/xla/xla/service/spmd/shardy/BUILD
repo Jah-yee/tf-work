@@ -126,6 +126,7 @@ xla_cc_test(
         "//xla/hlo/utils:hlo_matchers",
         "//xla/service:computation_layout",
         "//xla/tsl/platform:statusor",
+        "@com_google_absl//absl/log",
         "@com_google_googletest//:gtest_main",
     ],
 )
@@ -143,7 +144,6 @@ xla_cc_binary(
         "//xla/service/spmd/shardy/sdy_round_trip:dedup_meshes",
         "//xla/service/spmd/shardy/sdy_round_trip:export_ops",
         "//xla/service/spmd/shardy/sdy_round_trip:export_shardy_attrs",
-        "//xla/service/spmd/shardy/sdy_round_trip:flatten_call_graph",
         "//xla/service/spmd/shardy/sdy_round_trip:import_shardy_attrs",
         "//xla/service/spmd/shardy/sdy_round_trip:pipelines",
         "//xla/service/spmd/shardy/sdy_round_trip:shard_map_export",
